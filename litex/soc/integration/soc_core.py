@@ -290,6 +290,8 @@ class SoCCore(Module):
                 self.add_cpu(minerva.Minerva(platform, self.cpu_reset_address, self.cpu_variant))
             elif cpu_type == "rocket":
                 self.add_cpu(rocket.RocketRV64(platform, self.cpu_reset_address, self.cpu_variant))
+            elif cpu_type == "serv":
+                self.add_cpu(serv.SERV(platform, self.cpu_reset_address, self.cpu_variant))
             else:
                 raise ValueError("Unsupported CPU type: {}".format(cpu_type))
 
@@ -576,7 +578,7 @@ class SoCCore(Module):
 
 def soc_core_args(parser):
     parser.add_argument("--cpu-type", default=None,
-                        help="select CPU: lm32, or1k, picorv32, vexriscv, minerva, rocket")
+                        help="select CPU: lm32, or1k, picorv32, vexriscv, minerva, rocket, serv")
     parser.add_argument("--cpu-variant", default=None,
                         help="select CPU variant")
     parser.add_argument("--integrated-rom-size", default=None, type=int,

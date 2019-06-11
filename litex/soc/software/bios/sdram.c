@@ -32,6 +32,8 @@ __attribute__((unused)) static void cdelay(int i)
 		__asm__ volatile("nop");
 #elif defined (__rocket__)
 		__asm__ volatile("nop");
+#elif defined (__serv__)
+		__asm__ volatile("nop");
 #else
 #error Unsupported architecture
 #endif

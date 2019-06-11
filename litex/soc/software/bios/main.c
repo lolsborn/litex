@@ -418,6 +418,8 @@ int main(int i, char **c)
 	printf("Minerva");
 #elif __rocket__
 	printf("RocketRV64[imac]");
+#elif __serv__
+	printf("SERV");
 #else
 	printf("Unknown");
 #endif
