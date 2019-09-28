@@ -242,4 +242,3 @@ class RocketRV32(Module):
             "AsyncResetReg.v",
             "EICG_wrapper.v",
         )
-        import pdb; pdb.set_trace()
