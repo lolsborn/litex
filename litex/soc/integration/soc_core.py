@@ -122,6 +122,20 @@ class SoCCore(Module):
         if cpu_type == "None":
             cpu_type = None
 
+<<<<<<< HEAD
+=======
+        # FIXME: On RocketChip, CSRs *must* be 64-bit aligned.
+        # NOTE: RocketChip reserves the first 256Mbytes for internal use,
+        #       so we must change default mem_map;
+        #       Also, CSRs *must* be 64-bit aligned.
+        if cpu_type == "rocket" or "rocket32":
+            self.soc_mem_map["rom"]  = 0x10000000
+            self.soc_mem_map["sram"] = 0x11000000
+            self.soc_mem_map["csr"]  = 0x12000000
+        if cpu_type == "rocket":
+            csr_alignment = 64
+
+>>>>>>> 1ea182d7c697a5676e946b70344ef69b6a40f193
         if not with_wishbone:
             self.soc_mem_map["csr"]  = 0x00000000
 
@@ -165,6 +179,11 @@ class SoCCore(Module):
         if cpu_type is not None:
             if cpu_variant is not None:
                 self.config["CPU_VARIANT"] = str(cpu_variant.split('+')[0]).upper()
+<<<<<<< HEAD
+
+=======
+            
+>>>>>>> 1ea182d7c697a5676e946b70344ef69b6a40f193
             # Check type
             if cpu_type not in cpu.CPUS.keys():
                 raise ValueError("Unsupported CPU type: {}".format(cpu_type))
