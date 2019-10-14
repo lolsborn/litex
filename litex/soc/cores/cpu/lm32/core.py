@@ -21,6 +21,7 @@ class LM32(CPU):
     endianness           = "big"
     gcc_triple           = "lm32-elf"
     linker_output_format = "elf32-lm32"
+    io_regions           = {0x80000000: 0x80000000} # origin, length
 
     @property
     def gcc_flags(self):
@@ -33,12 +34,13 @@ class LM32(CPU):
 
     def __init__(self, platform, variant="standard"):
         assert variant in CPU_VARIANTS, "Unsupported variant %s" % variant
-        self.platform = platform
-        self.variant  = variant
+        self.platform  = platform
+        self.variant   = variant
         self.reset     = Signal()
         self.ibus      = i = wishbone.Interface()
         self.dbus      = d = wishbone.Interface()
         self.interrupt = Signal(32)
+        self.buses     = [i, d]
 
         # # #
 

@@ -21,6 +21,7 @@ class MOR1KX(CPU):
     gcc_triple           = "or1k-elf"
     clang_triple         = "or1k-linux"
     linker_output_format = "elf32-or1k"
+    io_regions           = {0x80000000: 0x80000000} # origin, length
 
     @property
     def mem_map_linux(self):
@@ -31,7 +32,7 @@ class MOR1KX(CPU):
             "main_ram" : 0x00000000,
             "rom"      : 0x10000000,
             "sram"     : 0x50000000,
-            "csr"      : 0x60000000,
+            "csr"      : 0xe0000000,
         }
 
     @property
@@ -62,11 +63,12 @@ class MOR1KX(CPU):
 
     def __init__(self, platform, variant="standard"):
         assert variant in CPU_VARIANTS, "Unsupported variant %s" % variant
-        self.platform = platform
-        self.variant  = variant
+        self.platform  = platform
+        self.variant   = variant
         self.reset     = Signal()
         self.ibus      = i = wishbone.Interface()
         self.dbus      = d = wishbone.Interface()
+        self.buses     = [i, d]
         self.interrupt = Signal(32)
 
         if variant == "linux":

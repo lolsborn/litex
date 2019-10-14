@@ -36,6 +36,7 @@ class PicoRV32(CPU):
     endianness           = "little"
     gcc_triple           = ("riscv64-unknown-elf", "riscv32-unknown-elf", "riscv-none-embed")
     linker_output_format = "elf32-littleriscv"
+    io_regions           = {0x80000000: 0x80000000} # origin, length
 
     @property
     def gcc_flags(self):
@@ -54,11 +55,11 @@ class PicoRV32(CPU):
 
     def __init__(self, platform, variant="standard"):
         assert variant in CPU_VARIANTS, "Unsupported variant %s" % variant
-        self.platform = platform
-        self.variant  = variant
+        self.platform  = platform
+        self.variant   = variant
         self.reset     = Signal()
-        self.ibus      = i = wishbone.Interface()
-        self.dbus      = d = wishbone.Interface()
+        self.idbus     = idbus = wishbone.Interface()
+        self.buses     = [idbus]
         self.interrupt = Signal(32)
         self.trap      = Signal()
 
@@ -102,7 +103,7 @@ class PicoRV32(CPU):
 
         if variant == "minimal":
             self.cpu_params.update(
-                p_ENABLE_COUNTER    = 0,
+                p_ENABLE_COUNTERS   = 0,
                 p_ENABLE_COUNTERS64 = 0,
                 p_TWO_STAGE_SHIFT   = 0,
                 p_CATCH_MISALIGN    = 0,
@@ -152,33 +153,16 @@ class PicoRV32(CPU):
 
         # adapt memory interface to wishbone
         self.comb += [
-             # instruction
-             i.adr.eq(mem_addr[2:]),
-             i.dat_w.eq(mem_wdata),
-             i.we.eq(mem_wstrb != 0),
-             i.sel.eq(mem_wstrb),
-             i.cyc.eq(mem_valid & mem_instr),
-             i.stb.eq(mem_valid & mem_instr),
-             i.cti.eq(0),
-             i.bte.eq(0),
-             If(mem_instr,
-                 mem_ready.eq(i.ack),
-                 mem_rdata.eq(i.dat_r),
-             ),
-
-             # data
-             d.adr.eq(mem_addr[2:]),
-             d.dat_w.eq(mem_wdata),
-             d.we.eq(mem_wstrb != 0),
-             d.sel.eq(mem_wstrb),
-             d.cyc.eq(mem_valid & ~mem_instr),
-             d.stb.eq(mem_valid & ~mem_instr),
-             d.cti.eq(0),
-             d.bte.eq(0),
-             If(~mem_instr,
-                 mem_ready.eq(d.ack),
-                 mem_rdata.eq(d.dat_r)
-             )
+            idbus.adr.eq(mem_addr[2:]),
+            idbus.dat_w.eq(mem_wdata),
+            idbus.we.eq(mem_wstrb != 0),
+            idbus.sel.eq(mem_wstrb),
+            idbus.cyc.eq(mem_valid),
+            idbus.stb.eq(mem_valid),
+            idbus.cti.eq(0),
+            idbus.bte.eq(0),
+            mem_ready.eq(idbus.ack),
+            mem_rdata.eq(idbus.dat_r),
         ]
 
         # add verilog sources

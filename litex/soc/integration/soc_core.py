@@ -69,16 +69,16 @@ class SoCCore(Module):
     csr_map       = {}
     interrupt_map = {}
     mem_map       = {
-        "rom":      0x00000000,  # (default shadow @0x80000000)
-        "sram":     0x01000000,  # (default shadow @0x81000000)
-        "csr":      0x02000000,  # (default shadow @0x82000000)
-        "main_ram": 0x40000000,  # (default shadow @0xc0000000)
+        "rom":      0x00000000,
+        "sram":     0x01000000,
+        "main_ram": 0x40000000,
+        "csr":      0x82000000,
     }
+    io_regions   = {}
+
     def __init__(self, platform, clk_freq,
                 # CPU parameters
                 cpu_type="vexriscv", cpu_reset_address=0x00000000, cpu_variant=None,
-                # MEM MAP parameters
-                shadow_base=0x80000000,
                 # ROM parameters
                 integrated_rom_size=0, integrated_rom_init=[],
                 # SRAM parameters
@@ -96,7 +96,8 @@ class SoCCore(Module):
                 # Controller parameters
                 with_ctrl=True,
                 # Wishbone parameters
-                with_wishbone=True, wishbone_timeout_cycles=1e6):
+                with_wishbone=True, wishbone_timeout_cycles=1e6,
+                **kwargs):
         self.platform = platform
         self.clk_freq = clk_freq
 
@@ -104,6 +105,7 @@ class SoCCore(Module):
         self.soc_csr_map       = {}
         self.soc_interrupt_map = {}
         self.soc_mem_map       = self.mem_map
+        self.soc_io_regions    = self.io_regions
 
         # SoC's Config/Constants/Regions
         self.config      = {}
@@ -117,6 +119,8 @@ class SoCCore(Module):
 
         # CSR masters list
         self._csr_masters = []
+
+        self.add_retro_compat(kwargs)
 
         # Parameters managment ---------------------------------------------------------------------
         if cpu_type == "None":
@@ -141,9 +145,6 @@ class SoCCore(Module):
 
         self.cpu_type    = cpu_type
         self.cpu_variant = cpu.check_format_cpu_variant(cpu_variant)
-
-        self.shadow_base = shadow_base
-        self.config["SHADOW_BASE"] = shadow_base
 
         self.integrated_rom_size        = integrated_rom_size
         self.integrated_rom_initialized = integrated_rom_init != []
@@ -193,13 +194,19 @@ class SoCCore(Module):
             # Update Memory Map (if defined by CPU)
             self.soc_mem_map.update(self.cpu.mem_map)
 
+            # Update IO Regions (if defined by CPU)
+            self.soc_io_regions.update(self.cpu.io_regions)
+
             # Set reset address
             self.cpu.set_reset_address(self.soc_mem_map["rom"] if integrated_rom_size else cpu_reset_address)
             self.config["CPU_RESET_ADDR"] = self.cpu.reset_address
 
-            # Add Instruction/Data buses as Wisbone masters
-            self.add_wb_master(self.cpu.ibus)
-            self.add_wb_master(self.cpu.dbus)
+            # Add CPU buses as 32-bit Wishbone masters
+            for cpu_bus in self.cpu.buses:
+                assert cpu_bus.data_width in [32, 64, 128]
+                soc_bus = wishbone.Interface(data_width=32)
+                self.submodules += wishbone.Converter(cpu_bus, soc_bus)
+                self.add_wb_master(soc_bus)
 
             # Add CPU CSR (dynamic)
             self.add_csr("cpu", allow_user_defined=True)
@@ -213,6 +220,7 @@ class SoCCore(Module):
                 self.comb += self.cpu.reset.eq(self.ctrl.reset)
         else:
             self.add_cpu(cpu.CPUNone())
+            self.soc_io_regions.update(self.cpu.io_regions)
 
         # Add user's interrupts (needs to be done after CPU interrupts are allocated)
         for _name, _id in self.interrupt_map.items():
@@ -367,7 +375,24 @@ class SoCCore(Module):
             raise FinalizeError
         self._csr_masters.append(csrm)
 
-    def add_memory_region(self, name, origin, length):
+    def check_io_region(self, name, origin, length):
+        for region_origin, region_length in self.soc_io_regions.items():
+            if (origin >= region_origin) & ((origin + length) < (region_origin + region_length)):
+                return
+        msg = "{} region (0x{:08x}-0x{:08x}) is not located in an IO region.\n".format(
+            name, origin, origin + length - 1)
+        msg += "Available IO regions: "
+        if not bool(self.soc_io_regions):
+            msg += "None\n"
+        else:
+            msg += "\n"
+            for region_origin, region_length in self.soc_io_regions.items():
+                msg += "- 0x{:08x}-0x{:08x}\n".format(region_origin, region_origin + region_length - 1)
+        raise ValueError(msg)
+
+    def add_memory_region(self, name, origin, length, io_region=False):
+        if io_region:
+            self.check_io_region(name, origin, length)
         def in_this_region(addr):
             return addr >= origin and addr < origin + length
         for n, r in self.mem_regions.items():
@@ -394,6 +419,7 @@ class SoCCore(Module):
                 raise ValueError("CSR region conflict between {} and {}".format(n, name))
 
     def add_csr_region(self, name, origin, busword, obj):
+        self.check_io_region(name, origin, 0x800)
         self.check_csr_region(name, origin)
         self.csr_regions[name] = SoCCSRRegion(origin, busword, obj)
 
@@ -452,14 +478,14 @@ class SoCCore(Module):
         # Check and add CSRs regions
         for name, csrs, mapaddr, rmap in self.csrbankarray.banks:
             self.check_csr_range(name, 0x800*mapaddr)
-            self.add_csr_region(name, (self.soc_mem_map["csr"] + 0x800*mapaddr) | self.shadow_base,
+            self.add_csr_region(name, (self.soc_mem_map["csr"] + 0x800*mapaddr),
                 self.csr_data_width, csrs)
 
         # Check and add Memory regions
         for name, memory, mapaddr, mmap in self.csrbankarray.srams:
             self.check_csr_range(name, 0x800*mapaddr)
             self.add_csr_region(name + "_" + memory.name_override,
-                (self.soc_mem_map["csr"] + 0x800*mapaddr) | self.shadow_base,
+                (self.soc_mem_map["csr"] + 0x800*mapaddr),
                 self.csr_data_width, memory)
 
         # Add CSRs / Config items to constants
@@ -483,32 +509,78 @@ class SoCCore(Module):
                         self.comb += self.cpu.interrupt[_id].eq(module.ev.irq)
                     self.constants[_name.upper() + "_INTERRUPT"] = _id
 
+
+    # API retro-compatibility layer ----------------------------------------------------------------
+    # Allow user to build the design the old API for ~3 months after the API change is introduced.
+    # Adds warning and artificical delay to encourage user to update.
+
+    def add_retro_compat(self, kwargs):
+        # 2019-10-09 : deprecate shadow_base, introduce io_regions
+        if "shadow_base" in kwargs.keys():
+            deprecated_warning(": shadow_base replaced by IO regions.")
+        self.retro_compat_shadow_base = kwargs.get("shadow_base", 0x80000000)
+        self.config["SHADOW_BASE"] = self.retro_compat_shadow_base
+
+    def __getattr__(self, name):
+        # 2019-10-09: deprecate shadow_base, introduce io_regions
+        if name == "shadow_base":
+            deprecated_warning(": shadow_base replaced by IO regions.")
+            return self.retro_compat_shadow_base
+        else:
+            return Module.__getattr__(self, name)
+
 # SoCCore arguments --------------------------------------------------------------------------------
 
 def soc_core_args(parser):
+    # CPU parameters
     parser.add_argument("--cpu-type", default=None,
                         help="select CPU: {}".format(", ".join(iter(cpu.CPUS.keys()))))
     parser.add_argument("--cpu-variant", default=None,
-                        help="select CPU variant")
+                        help="select CPU variant, (default=standard)")
+    parser.add_argument("--cpu-reset-address", default=None, type=int,
+                        help="CPU reset address (default=0x00000000 or ROM)")
+    # ROM parameters
     parser.add_argument("--integrated-rom-size", default=None, type=int,
                         help="size/enable the integrated (BIOS) ROM")
+    # SRAM parameters
+    parser.add_argument("--integrated_sram_size", default=None,
+                        help="size/enable the integrated SRAM")
+    # MAIN_RAM parameters
     parser.add_argument("--integrated-main-ram-size", default=None, type=int,
                         help="size/enable the integrated main RAM")
+    # CSR parameters
+    parser.add_argument("--csr-data-width", default=None, type=int,
+                        help="CSR bus data-width (8 or 32, default=8)")
+    parser.add_argument("--csr-address-width", default=14, type=int,
+                        help="CSR bus address-width")
+    # Identifier parameters
+    parser.add_argument("--ident", default=None, type=str,
+                        help="SoC identifier (default=\"\"")
+    parser.add_argument("--ident-version", default=None, type=bool,
+                        help="add date/time to SoC identifier (default=False)")
+    # UART parameters
+    parser.add_argument("--with-uart", default=None, type=bool,
+                        help="with UART (default=True)")
+    parser.add_argument("--uart-name", default="serial", type=str,
+                        help="UART type/name (default=serial)")
+    parser.add_argument("--uart-baudrate", default=None, type=int,
+                        help="UART baudrate (default=115200)")
     parser.add_argument("--uart-stub", default=False, type=bool,
-                        help="enable uart stub")
-
+                        help="enable UART stub (default=False)")
+    # Timer parameters
+    parser.add_argument("--with-timer", default=None, type=bool,
+                        help="with Timer (default=True)")
+    # Controller parameters
+    parser.add_argument("--with-ctrl", default=None, type=bool,
+                        help="with Controller (default=True)")
 
 def soc_core_argdict(args):
     r = dict()
-    for a in [
-        "cpu_type",
-        "cpu_variant",
-        "integrated_rom_size",
-        "integrated_main_ram_size",
-        "uart_stub"]:
-        arg = getattr(args, a)
-        if arg is not None:
-            r[a] = arg
+    for a in inspect.getargspec(SoCCore.__init__).args:
+        if a not in ["self", "platform"]:
+            arg = getattr(args, a, None)
+            if arg is not None:
+                r[a] = arg
     return r
 
 # SoCMini ---------------------------------------------------------------------------------------

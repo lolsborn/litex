@@ -8,6 +8,7 @@ import argparse
 from migen import *
 
 from litex.boards.platforms import arty
+from litex.build.xilinx.vivado import vivado_build_args, vivado_build_argdict
 
 from litex.soc.cores.clock import *
 from litex.soc.integration.soc_sdram import *
@@ -72,7 +73,7 @@ class BaseSoC(SoCSDRAM):
 
 class EthernetSoC(BaseSoC):
     mem_map = {
-        "ethmac": 0x30000000,  # (shadow @0xb0000000)
+        "ethmac": 0xb0000000,
     }
     mem_map.update(BaseSoC.mem_map)
 
@@ -85,7 +86,7 @@ class EthernetSoC(BaseSoC):
         self.submodules.ethmac = LiteEthMAC(phy=self.ethphy, dw=32,
             interface="wishbone", endianness=self.cpu.endianness)
         self.add_wb_slave(self.mem_map["ethmac"], self.ethmac.bus, 0x2000)
-        self.add_memory_region("ethmac", self.mem_map["ethmac"] | self.shadow_base, 0x2000)
+        self.add_memory_region("ethmac", self.mem_map["ethmac"], 0x2000, io_region=True)
         self.add_csr("ethmac")
         self.add_interrupt("ethmac")
 
@@ -105,6 +106,7 @@ def main():
     parser = argparse.ArgumentParser(description="LiteX SoC on Arty")
     builder_args(parser)
     soc_sdram_args(parser)
+    vivado_build_args(parser)
     parser.add_argument("--with-ethernet", action="store_true",
                         help="enable Ethernet support")
     args = parser.parse_args()
@@ -112,7 +114,7 @@ def main():
     cls = EthernetSoC if args.with_ethernet else BaseSoC
     soc = cls(**soc_sdram_argdict(args))
     builder = Builder(soc, **builder_argdict(args))
-    builder.build()
+    builder.build(**vivado_build_argdict(args))
 
 
 if __name__ == "__main__":

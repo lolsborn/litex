@@ -56,14 +56,17 @@ class RocketRV64(CPU):
     endianness           = "little"
     gcc_triple           = ("riscv64-unknown-elf")
     linker_output_format = "elf64-littleriscv"
+    io_regions           = {0x10000000: 0x70000000} # origin, length
 
     @property
     def mem_map(self):
         # Rocket reserves the first 256Mbytes for internal use, so we must change default mem_map.
         return {
-            "rom"  : 0x10000000,
-            "sram" : 0x11000000,
-            "csr"  : 0x12000000,
+            "rom"      : 0x10000000,
+            "sram"     : 0x11000000,
+            "csr"      : 0x12000000,
+            "ethmac"   : 0x30000000,
+            "main_ram" : 0x80000000,
         }
 
     @property
@@ -76,20 +79,19 @@ class RocketRV64(CPU):
     def __init__(self, platform, variant="standard"):
         assert variant in CPU_VARIANTS, "Unsupported variant %s" % variant
 
-        self.platform = platform
-        self.variant  = variant
+        self.platform  = platform
+        self.variant   = variant
 
         self.reset     = Signal()
         self.interrupt = Signal(4)
 
-        self.mem_axi  = mem_axi  = axi.AXIInterface(data_width=64, address_width=32, id_width=4)
-        self.mmio_axi = mmio_axi = axi.AXIInterface(data_width=64, address_width=32, id_width=4)
+        self.mem_axi   =  mem_axi = axi.AXIInterface(data_width=64, address_width=32, id_width=4)
+        self.mmio_axi  = mmio_axi = axi.AXIInterface(data_width=64, address_width=32, id_width=4)
 
-        self.mem_wb  = mem_wb  = wishbone.Interface(data_width=64, adr_width=29)
-        self.mmio_wb = mmio_wb = wishbone.Interface(data_width=64, adr_width=29)
+        self.mem_wb    =  mem_wb = wishbone.Interface(data_width=64, adr_width=29)
+        self.mmio_wb   = mmio_wb = wishbone.Interface(data_width=64, adr_width=29)
 
-        self.ibus = ibus = wishbone.Interface()
-        self.dbus = dbus = wishbone.Interface()
+        self.buses     = [mem_wb, mmio_wb]
 
         # # #
 
@@ -205,19 +207,14 @@ class RocketRV64(CPU):
         )
 
         # adapt axi interfaces to wishbone
-        mem_a2w = ResetInserter()(axi.AXI2Wishbone(mem_axi, mem_wb, base_address=0))
+        mem_a2w  = ResetInserter()(axi.AXI2Wishbone(mem_axi, mem_wb, base_address=0))
         mmio_a2w = ResetInserter()(axi.AXI2Wishbone(mmio_axi, mmio_wb, base_address=0))
         # NOTE: AXI2Wishbone FSMs must be reset with the CPU!
         self.comb += [
-            mem_a2w.reset.eq(ResetSignal() | self.reset),
+            mem_a2w.reset.eq( ResetSignal() | self.reset),
             mmio_a2w.reset.eq(ResetSignal() | self.reset),
         ]
-
-        # down-convert wishbone from 64 to 32 bit data width
-        mem_dc = wishbone.Converter(mem_wb, ibus)
-        mmio_dc = wishbone.Converter(mmio_wb, dbus)
-
-        self.submodules += mem_a2w, mem_dc, mmio_a2w, mmio_dc
+        self.submodules += mem_a2w, mmio_a2w
 
         # add verilog sources
         self.add_sources(platform, variant)

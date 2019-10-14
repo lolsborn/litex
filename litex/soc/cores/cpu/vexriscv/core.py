@@ -80,6 +80,16 @@ class VexRiscv(CPU, AutoCSR):
     endianness           = "little"
     gcc_triple           = ("riscv64-unknown-elf", "riscv32-unknown-elf", "riscv-none-embed")
     linker_output_format = "elf32-littleriscv"
+    io_regions           = {0x80000000: 0x80000000} # origin, length
+
+    @property
+    def mem_map_linux(self):
+        return {
+            "rom":          0x00000000,
+            "sram":         0x10000000,
+            "main_ram":     0xc0000000,
+            "csr":          0xf0000000,
+        }
 
     @property
     def gcc_flags(self):
@@ -92,10 +102,11 @@ class VexRiscv(CPU, AutoCSR):
         self.platform         = platform
         self.variant          = variant
         self.external_variant = None
-        self.reset     = Signal()
-        self.ibus      = ibus = wishbone.Interface()
-        self.dbus      = dbus = wishbone.Interface()
-        self.interrupt = Signal(32)
+        self.reset            = Signal()
+        self.ibus             = ibus = wishbone.Interface()
+        self.dbus             = dbus = wishbone.Interface()
+        self.buses            = [ibus, dbus]
+        self.interrupt        = Signal(32)
 
         self.cpu_params = dict(
                 i_clk=ClockSignal(),
@@ -132,6 +143,7 @@ class VexRiscv(CPU, AutoCSR):
 
         if "linux" in variant:
             self.add_timer()
+            self.mem_map = self.mem_map_linux
 
         if "debug" in variant:
             self.add_debug()
